@@ -6,7 +6,7 @@
     "password": "",
     "database": "api_boilerplate"
   },
-  "secret": "change-this-to-a-long-random-secret",
+  "secret": "OYAN, JOHN TIMOTHY P.",
   "emailFrom": "noreply@example.com",
   "smtp": {
     "host": "smtp.ethereal.email",
