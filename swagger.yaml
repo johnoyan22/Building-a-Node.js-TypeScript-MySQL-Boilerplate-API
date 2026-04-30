@@ -1,0 +1,163 @@
+openapi: 3.0.0
+info:
+  title: Node.js + TypeScript + MySQL boilerplate API
+  version: 1.0.0
+  description: |
+    Authentication with JWT (15m) and refresh token (HTTP-only cookie, 7d, rotation on refresh).
+    First registered user becomes **Admin**; all others are **User**.
+servers:
+  - url: http://localhost:4000
+    description: Local
+paths:
+  /accounts/register:
+    post:
+      summary: Register; sends verification email (configure SMTP in config.json)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+      responses:
+        '200':
+          description: Registration successful message
+  /accounts/verify-email:
+    post:
+      summary: Verify email with token from the email
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Token'
+      responses:
+        '200': { description: Ok }
+  /accounts/authenticate:
+    post:
+      summary: Login; returns JWT in body, sets refresh cookie
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Login' }
+      responses:
+        '200': { description: User + access token; refresh in Set-Cookie }
+  /accounts/refresh-token:
+    post:
+      summary: Exchange refresh token (cookie or body) for a new access token; rotates refresh
+      responses:
+        '200': { description: user + new token; new Set-Cookie }
+  /accounts/revoke-token:
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Revoke a refresh token (use cookie with empty body, or pass refreshToken in body)
+      responses:
+        '200': { description: Token revoked }
+  /accounts/forgot-password:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
+      responses:
+        '200': { description: Instructions message }
+  /accounts/reset-password:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password, confirmPassword]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 6 }
+                confirmPassword: { type: string }
+      responses:
+        '200': { description: Ok }
+  /accounts:
+    get:
+      security: [ { bearerAuth: [] } ]
+      summary: List all accounts (Admin)
+      responses:
+        '200': { description: Array of accounts }
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Create account (Admin)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminCreate' }
+  /accounts/{id}:
+    get:
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      summary: Get by id (self or Admin)
+      responses: { '200': { description: account } }
+    put:
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      summary: Update (self; Admin can change any including role)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Update' }
+    delete:
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      summary: Delete (self or Admin)
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Register:
+      type: object
+      required: [firstName, lastName, email, password]
+      properties:
+        title: { type: string, example: "Mr" }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+    Login:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    Token:
+      type: object
+      required: [token]
+      properties: { token: { type: string } }
+    AdminCreate:
+      type: object
+      required: [firstName, lastName, email, password, role]
+      properties:
+        title: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        password: { type: string }
+        role: { type: string, enum: [Admin, User] }
+    Update:
+      type: object
+      properties:
+        title: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        password: { type: string }
+        role: { type: string, enum: [Admin, User] }

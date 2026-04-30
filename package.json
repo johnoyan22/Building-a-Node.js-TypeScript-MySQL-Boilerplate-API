@@ -1,0 +1,43 @@
+{
+  "name": "nodejs-typescript-mysql-boilerplate-api",
+  "version": "1.0.0",
+  "description": "Authentication API: Express, TypeScript, Sequelize, MySQL, JWT & refresh tokens",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon --watch . --ext ts,json --exec \"ts-node server.ts\"",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "keywords": ["express", "typescript", "mysql", "sequelize", "jwt"],
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-jwt": "^8.4.1",
+    "joi": "^17.12.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "mysql2": "^3.11.0",
+    "nodemailer": "^6.9.13",
+    "sequelize": "^6.37.3",
+    "swagger-ui-express": "^5.0.1",
+    "yamljs": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/morgan": "^1.9.9",
+    "@types/nodemailer": "^6.4.14",
+    "@types/node": "^20.11.0",
+    "@types/swagger-ui-express": "^4.1.6",
+    "@types/yamljs": "^0.2.34",
+    "nodemon": "^3.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
