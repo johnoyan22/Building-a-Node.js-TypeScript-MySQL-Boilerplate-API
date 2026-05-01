@@ -30,7 +30,7 @@ export const authorize = (...allowedRoles: RoleType[]) => {
       }
       const u = a.toJSON() as { id: number; role: RoleType };
       if (needFilter && !allow.has(u.role)) {
-        return res.status(401).json({ message: 'Unauthorized' });
+        return res.status(403).json({ message: 'Forbidden: insufficient role' });
       }
       const ownsToken = (d: { token: string; accountId: number }) => d.accountId === u.id;
       req.user = { id: u.id, sub: String(u.id), role: u.role, ownsToken };

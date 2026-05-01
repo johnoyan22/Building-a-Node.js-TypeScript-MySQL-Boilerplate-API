@@ -15,14 +15,22 @@ const app = (0, express_1.default)();
 app.use((0, morgan_1.default)('dev'));
 app.use((0, cors_1.default)({ origin: true, credentials: true }));
 app.use(express_1.default.json());
+app.use(express_1.default.urlencoded({ extended: true }));
 app.use((0, cookie_parser_1.default)());
+app.use((req, _res, next) => {
+    if (req.body == null || typeof req.body !== 'object') {
+        req.body = {};
+    }
+    next();
+});
 app.get('/health', (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
 });
 app.use('/accounts', accounts_controller_1.default);
 (0, swagger_1.setupSwagger)(app, (0, swagger_1.swaggerPath)());
 app.use(error_handler_1.errorHandler);
-const port = 4000;
+const rawPort = process.env.PORT;
+const port = rawPort != null && rawPort !== '' && !Number.isNaN(Number(rawPort)) ? Number(rawPort) : 4000;
 void (0, db_1.initialize)()
     .then(() => {
     app.listen(port, () => {

@@ -55,6 +55,16 @@ router.post('/register', registerSchema, (req, res, next) => {
 function verifySchema(req: Request, res: Response, next: NextFunction) {
   validateRequest(req, next, Joi.object({ token: Joi.string().required() }));
 }
+router.get('/verify-email', (req, res, next) => {
+  const token = String(req.query.token ?? '');
+  if (!token) {
+    return (next as (e: string) => void)('Validation: "token" is required');
+  }
+  return accountService
+    .verifyEmail(token)
+    .then((r) => res.json(r))
+    .catch(next);
+});
 router.post('/verify-email', verifySchema, (req, res, next) => {
   accountService
     .verifyEmail(req.body.token)
@@ -74,7 +84,20 @@ router.post('/authenticate', authenticateSchema, (req, res, next) => {
     .authenticate({ email: req.body.email, password: req.body.password, ipAddress: clientIp(req) })
     .then((d) => {
       const { refreshToken, ...rest } = d;
-      if (typeof refreshToken === 'string' && (rest as { token: string }).token) {
+      if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
+        res.cookie('refreshToken', refreshToken, refreshCookie);
+      }
+      return res.json(rest);
+    })
+    .catch(next);
+});
+// Backward-compatible alias for common typo in clients.
+router.post('/aunthenticate', authenticateSchema, (req, res, next) => {
+  accountService
+    .authenticate({ email: req.body.email, password: req.body.password, ipAddress: clientIp(req) })
+    .then((d) => {
+      const { refreshToken, ...rest } = d;
+      if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
         res.cookie('refreshToken', refreshToken, refreshCookie);
       }
       return res.json(rest);
@@ -122,9 +145,20 @@ router.post(
       .catch(next);
   }
 );
+router.get('/validate-reset-token', (req, res, next) => {
+  const token = String(req.query.token ?? '');
+  if (!token) {
+    return (next as (e: string) => void)('Validation: "token" is required');
+  }
+  return accountService
+    .validateResetToken(token)
+    .then((r) => res.json(r))
+    .catch(next);
+});
 
-router.post('/refresh-token', (req, res, next) => {
-  const t = (req as Request & { cookies?: { refreshToken?: string } }).cookies?.refreshToken || req.body?.refreshToken;
+const refreshTokenHandler: RequestHandler = (req, res, next) => {
+  const body = (req.body ?? {}) as { refreshToken?: string };
+  const t = (req as Request & { cookies?: { refreshToken?: string } }).cookies?.refreshToken || body.refreshToken;
   if (!t) {
     return (next as (e: string) => void)('Invalid or missing refresh token');
   }
@@ -137,13 +171,15 @@ router.post('/refresh-token', (req, res, next) => {
       return res.json({ user: d.user, token: d.token });
     })
     .catch(next);
-});
+};
+router.post('/refresh-token', refreshTokenHandler);
+router.get('/refresh-token', refreshTokenHandler);
 
 router.post(
   '/revoke-token',
   ...auth0(),
   (req, res, next) => {
-    const fromBody = (req.body as { refreshToken?: string } | undefined)?.refreshToken;
+    const fromBody = ((req.body ?? {}) as { refreshToken?: string }).refreshToken;
     const c = (req as Request & { cookies?: { refreshToken?: string } }).cookies;
     const token = (fromBody !== undefined && fromBody !== null && fromBody !== '' ? fromBody : c?.refreshToken) as string | undefined;
     if (token == null || token === '') {
@@ -168,7 +204,7 @@ router.post(
 
 router.get(
   '/',
-  ...authAdmin(),
+  ...auth0(),
   (req, res, next) => {
     accountService
       .getAll()
@@ -190,10 +226,12 @@ const ensureSelfOrAdmin = (req: Request) => {
 
 router.get(
   '/:id',
-  ...auth0(),
   (req, res, next) => {
     try {
-      const id = ensureSelfOrAdmin(req);
+      const id = Number(req.params.id);
+      if (Number.isNaN(id)) {
+        return (next as (e: string) => void)('Invalid id');
+      }
       return accountService
         .getById(id)
         .then((r) => res.json(r))

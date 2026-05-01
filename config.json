@@ -3,7 +3,7 @@
     "host": "localhost",
     "port": 3306,
     "user": "root",
-    "password": "",
+    "password": "P@ssw0rd",
     "database": "api_boilerplate"
   },
   "secret": "OYAN, JOHN TIMOTHY P.",
@@ -11,7 +11,7 @@
   "smtp": {
     "host": "smtp.ethereal.email",
     "port": 587,
-    "user": "your-ethereal-user",
-    "pass": "your-ethereal-pass"
+    "user": "conor.huels@ethereal.email",
+    "pass": "brmrStVaZxRsXe6Rvg"
   }
 }

@@ -11,6 +11,21 @@ import type { Account as AccModel } from './account.model';
 const accLabel = (a: { firstName: string; lastName: string }) => `${a.firstName} ${a.lastName}`.trim();
 
 const basic = (a: AccModel) => a.toJSON() as unknown as Record<string, unknown>;
+const authView = (a: AccModel, jwToken: string) => {
+  const raw = a.toJSON() as unknown as Record<string, unknown>;
+  return {
+    id: raw.id,
+    title: raw.title,
+    firstName: raw.firstName,
+    lastName: raw.lastName,
+    email: raw.email,
+    role: raw.role,
+    created: raw.createdAt ?? null,
+    updated: raw.updatedAt ?? null,
+    isVerified: raw.verified != null,
+    jwToken,
+  };
+};
 
 const hashPassword = (plain: string) => bcrypt.hashSync(plain, 10);
 
@@ -24,16 +39,30 @@ const generateJwt = (a: { id: number; role: RoleType }) =>
   );
 
 async function sendVerification(a: AccModel, vToken: string) {
-  const link = `http://localhost:4000/verify-link?token=${encodeURIComponent(vToken)}`;
-  const html = `<p>Hi ${accLabel(a)}</p><p>Click to verify: <a href="${link}">${link}</a></p><p>Or POST the token to <code>/accounts/verify-email</code> with <code>{"token":"${vToken}"}</code></p>`;
-  await sendEmail({ to: a.email, subject: 'Verify your email', html });
+  const link = `http://localhost:4000/accounts/verify-email?token=${encodeURIComponent(vToken)}`;
+  const html = `
+    <h3>Verify Email</h3>
+    <p>Thanks for registering!</p>
+    <p>Please use the below token to verify your email address with the <code>/accounts/verify-email</code> api route:</p>
+    <p><code>${vToken}</code></p>
+    <p>Or click this link to verify directly:</p>
+    <p><a href="${link}">${link}</a></p>
+  `;
+  await sendEmail({ to: a.email, subject: 'Sign-up Verification API - Verify Email', html });
 }
 
 async function sendPasswordReset(a: AccModel) {
   const t = a.resetToken as string;
-  const link = `http://localhost:4000/reset-link?token=${encodeURIComponent(t)}`;
-  const html = `<p>Hi ${accLabel(a)}</p><p>Click to reset: <a href="${link}">${link}</a></p><p>Or use token in <code>/accounts/reset-password</code></p>`;
-  await sendEmail({ to: a.email, subject: 'Password reset', html });
+  const link = `http://localhost:4000/accounts/validate-reset-token?token=${encodeURIComponent(t)}`;
+  const html = `
+    <h3>Reset Password</h3>
+    <p>Hi ${accLabel(a)}</p>
+    <p>Please use the token below with the <code>/accounts/reset-password</code> api route:</p>
+    <p><code>${t}</code></p>
+    <p>Or click this link to validate the reset token first:</p>
+    <p><a href="${link}">${link}</a></p>
+  `;
+  await sendEmail({ to: a.email, subject: 'Sign-up Verification API - Reset Password', html });
 }
 
 async function buildRefresh(account: AccModel, ipAddress: string) {
@@ -56,11 +85,10 @@ export const accountService = {
     if (!a.verified) throw 'Not verified. Please check your email';
     const jwtT = generateJwt(a);
     const { token: refreshToken, expires, account } = await buildRefresh(a, ipAddress);
-    return { ...basic(account), token: jwtT, refreshToken, refreshTokenExpires: expires.getTime() } as {
-      [k: string]: unknown;
-      token: string;
-      refreshToken: string;
-      refreshTokenExpires: number;
+    return {
+      ...authView(account, jwtT),
+      refreshToken,
+      refreshTokenExpires: expires.getTime(),
     };
   },
 
@@ -82,8 +110,15 @@ export const accountService = {
       verificationToken,
       verified: null,
     })) as AccModel;
-    await sendVerification(a, verificationToken);
-    return { message: 'Registration successful — check your email to verify your account' };
+    try {
+      await sendVerification(a, verificationToken);
+    } catch (err) {
+      // Keep local development unblocked when SMTP is not configured.
+      // Account is still created; user can verify via token endpoints.
+      // eslint-disable-next-line no-console
+      console.warn('Verification email was not sent:', err);
+    }
+    return { message: 'Registration successful, please check your email for verification instructions' };
   },
 
   async verifyEmail(token: string) {

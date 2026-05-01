@@ -3,6 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.errorHandler = void 0;
 const errorHandler = (err, _req, res, _next) => {
     if (typeof err === 'string') {
+        if (err === 'Unauthorized' || err.startsWith('Unauthorized')) {
+            return res.status(401).json({ message: err });
+        }
         const is404 = err.toLowerCase().endsWith('not found');
         return res.status(is404 ? 404 : 400).json({ message: err });
     }

@@ -14,19 +14,48 @@ const send_email_1 = require("../_helpers/send-email");
 const db_1 = require("../_helpers/db");
 const accLabel = (a) => `${a.firstName} ${a.lastName}`.trim();
 const basic = (a) => a.toJSON();
+const authView = (a, jwToken) => {
+    const raw = a.toJSON();
+    return {
+        id: raw.id,
+        title: raw.title,
+        firstName: raw.firstName,
+        lastName: raw.lastName,
+        email: raw.email,
+        role: raw.role,
+        created: raw.createdAt ?? null,
+        updated: raw.updatedAt ?? null,
+        isVerified: raw.verified != null,
+        jwToken,
+    };
+};
 const hashPassword = (plain) => bcryptjs_1.default.hashSync(plain, 10);
 const randomString = (bytes = 20) => (0, crypto_1.randomBytes)(Math.ceil(bytes / 2)).toString('hex').slice(0, bytes);
 const generateJwt = (a) => jsonwebtoken_1.default.sign({ sub: String(a.id), id: a.id, role: a.role }, load_config_1.config.secret, { expiresIn: '15m' });
 async function sendVerification(a, vToken) {
-    const link = `http://localhost:4000/verify-link?token=${encodeURIComponent(vToken)}`;
-    const html = `<p>Hi ${accLabel(a)}</p><p>Click to verify: <a href="${link}">${link}</a></p><p>Or POST the token to <code>/accounts/verify-email</code> with <code>{"token":"${vToken}"}</code></p>`;
-    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Verify your email', html });
+    const link = `http://localhost:4000/accounts/verify-email?token=${encodeURIComponent(vToken)}`;
+    const html = `
+    <h3>Verify Email</h3>
+    <p>Thanks for registering!</p>
+    <p>Please use the below token to verify your email address with the <code>/accounts/verify-email</code> api route:</p>
+    <p><code>${vToken}</code></p>
+    <p>Or click this link to verify directly:</p>
+    <p><a href="${link}">${link}</a></p>
+  `;
+    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Sign-up Verification API - Verify Email', html });
 }
 async function sendPasswordReset(a) {
     const t = a.resetToken;
-    const link = `http://localhost:4000/reset-link?token=${encodeURIComponent(t)}`;
-    const html = `<p>Hi ${accLabel(a)}</p><p>Click to reset: <a href="${link}">${link}</a></p><p>Or use token in <code>/accounts/reset-password</code></p>`;
-    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Password reset', html });
+    const link = `http://localhost:4000/accounts/validate-reset-token?token=${encodeURIComponent(t)}`;
+    const html = `
+    <h3>Reset Password</h3>
+    <p>Hi ${accLabel(a)}</p>
+    <p>Please use the token below with the <code>/accounts/reset-password</code> api route:</p>
+    <p><code>${t}</code></p>
+    <p>Or click this link to validate the reset token first:</p>
+    <p><a href="${link}">${link}</a></p>
+  `;
+    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Sign-up Verification API - Reset Password', html });
 }
 async function buildRefresh(account, ipAddress) {
     const token = randomString(64);
@@ -49,7 +78,11 @@ exports.accountService = {
             throw 'Not verified. Please check your email';
         const jwtT = generateJwt(a);
         const { token: refreshToken, expires, account } = await buildRefresh(a, ipAddress);
-        return { ...basic(account), token: jwtT, refreshToken, refreshTokenExpires: expires.getTime() };
+        return {
+            ...authView(account, jwtT),
+            refreshToken,
+            refreshTokenExpires: expires.getTime(),
+        };
     },
     async register(params) {
         const { title, firstName, lastName, email, password } = params;
@@ -69,8 +102,16 @@ exports.accountService = {
             verificationToken,
             verified: null,
         }));
-        await sendVerification(a, verificationToken);
-        return { message: 'Registration successful — check your email to verify your account' };
+        try {
+            await sendVerification(a, verificationToken);
+        }
+        catch (err) {
+            // Keep local development unblocked when SMTP is not configured.
+            // Account is still created; user can verify via token endpoints.
+            // eslint-disable-next-line no-console
+            console.warn('Verification email was not sent:', err);
+        }
+        return { message: 'Registration successful, please check your email for verification instructions' };
     },
     async verifyEmail(token) {
         const a = await db_1.Account.findOne({ where: { verificationToken: token } });

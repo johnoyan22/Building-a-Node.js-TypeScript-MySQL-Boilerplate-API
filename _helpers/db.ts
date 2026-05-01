@@ -25,7 +25,7 @@ export const initialize = async () => {
   initAccountModel(sequelize);
   initRefreshTokenModel(sequelize);
 
-  Account.hasMany(RefreshToken, { onDelete: 'CASCADE' });
+  Account.hasMany(RefreshToken, { foreignKey: 'accountId', onDelete: 'CASCADE' });
   RefreshToken.belongsTo(Account, { foreignKey: 'accountId' });
 
   await sequelize.sync();
