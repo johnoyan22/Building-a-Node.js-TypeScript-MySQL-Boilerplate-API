@@ -11,14 +11,23 @@ Object.defineProperty(exports, "RefreshToken", { enumerable: true, get: function
 const { host, port, user, password, database } = load_config_1.config.database;
 let sequelize;
 const initialize = async () => {
-    const conn = await (0, promise_1.createConnection)({ host, port, user, password });
-    await conn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
-    await conn.end();
+    const useSsl = process.env.DB_SSL === 'true';
+    const sslConfig = useSsl ? { minVersion: 'TLSv1.2', rejectUnauthorized: false } : undefined;
+    try {
+        const conn = await (0, promise_1.createConnection)({ host, port, user, password, ssl: sslConfig });
+        await conn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
+        await conn.end();
+    }
+    catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`Could not create database \`${database}\` (it may already exist or user has limited privileges):`, err);
+    }
     sequelize = new sequelize_1.Sequelize(database, user, password, {
         host,
         port,
         dialect: 'mysql',
         logging: false,
+        dialectOptions: sslConfig ? { ssl: sslConfig } : undefined,
     });
     (0, account_model_1.initAccountModel)(sequelize);
     (0, refresh_token_model_1.initRefreshTokenModel)(sequelize);

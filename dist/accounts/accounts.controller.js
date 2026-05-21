@@ -15,7 +15,7 @@ const authAdmin = () => (0, authorize_1.authorize)(role_1.Role.Admin);
 const isProd = process.env.NODE_ENV === 'production';
 const refreshCookie = {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: isProd ? 'none' : 'lax',
     secure: isProd,
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
@@ -76,7 +76,7 @@ router.post('/authenticate', authenticateSchema, (req, res, next) => {
         if (typeof refreshToken === 'string' && rest.jwToken) {
             res.cookie('refreshToken', refreshToken, refreshCookie);
         }
-        return res.json(rest);
+        return res.json({ ...rest, refreshToken });
     })
         .catch(next);
 });
@@ -89,7 +89,7 @@ router.post('/aunthenticate', authenticateSchema, (req, res, next) => {
         if (typeof refreshToken === 'string' && rest.jwToken) {
             res.cookie('refreshToken', refreshToken, refreshCookie);
         }
-        return res.json(rest);
+        return res.json({ ...rest, refreshToken });
     })
         .catch(next);
 });
@@ -145,7 +145,23 @@ const refreshTokenHandler = (req, res, next) => {
         if (d.refreshToken) {
             res.cookie('refreshToken', d.refreshToken, refreshCookie);
         }
-        return res.json({ user: d.user, token: d.token });
+        const user = d.user;
+        const responsePayload = {
+            id: user.id,
+            title: user.title,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            role: user.role,
+            created: user.createdAt ?? user.created ?? null,
+            updated: user.updatedAt ?? user.updated ?? null,
+            isVerified: user.verified != null || user.isVerified === true,
+            jwToken: d.token,
+            refreshToken: d.refreshToken,
+            user: d.user,
+            token: d.token,
+        };
+        return res.json(responsePayload);
     })
         .catch(next);
 };
@@ -173,7 +189,7 @@ router.post('/revoke-token', ...auth0(), (req, res, next) => {
     })
         .catch(next);
 });
-router.get('/', ...auth0(), (req, res, next) => {
+router.get('/', ...authAdmin(), (req, res, next) => {
     account_service_1.accountService
         .getAll()
         .then((r) => res.json(r))
@@ -189,12 +205,9 @@ const ensureSelfOrAdmin = (req) => {
     }
     return id;
 };
-router.get('/:id', (req, res, next) => {
+router.get('/:id', ...auth0(), (req, res, next) => {
     try {
-        const id = Number(req.params.id);
-        if (Number.isNaN(id)) {
-            return next('Invalid id');
-        }
+        const id = ensureSelfOrAdmin(req);
         return account_service_1.accountService
             .getById(id)
             .then((r) => res.json(r))

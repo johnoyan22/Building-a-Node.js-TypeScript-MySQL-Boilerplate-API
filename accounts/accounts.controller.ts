@@ -13,7 +13,7 @@ const authAdmin = () => authorize(Role.Admin) as [RequestHandler, RequestHandler
 const isProd = process.env.NODE_ENV === 'production';
 const refreshCookie: CookieOptions = {
   httpOnly: true,
-  sameSite: 'lax',
+  sameSite: isProd ? 'none' : 'lax',
   secure: isProd,
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
@@ -87,7 +87,7 @@ router.post('/authenticate', authenticateSchema, (req, res, next) => {
       if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
         res.cookie('refreshToken', refreshToken, refreshCookie);
       }
-      return res.json(rest);
+      return res.json({ ...rest, refreshToken });
     })
     .catch(next);
 });
@@ -100,7 +100,7 @@ router.post('/aunthenticate', authenticateSchema, (req, res, next) => {
       if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
         res.cookie('refreshToken', refreshToken, refreshCookie);
       }
-      return res.json(rest);
+      return res.json({ ...rest, refreshToken });
     })
     .catch(next);
 });
@@ -168,7 +168,23 @@ const refreshTokenHandler: RequestHandler = (req, res, next) => {
       if (d.refreshToken) {
         res.cookie('refreshToken', d.refreshToken, refreshCookie);
       }
-      return res.json({ user: d.user, token: d.token });
+      const user = d.user as Record<string, any>;
+      const responsePayload = {
+        id: user.id,
+        title: user.title,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        created: user.createdAt ?? user.created ?? null,
+        updated: user.updatedAt ?? user.updated ?? null,
+        isVerified: user.verified != null || user.isVerified === true,
+        jwToken: d.token,
+        refreshToken: d.refreshToken,
+        user: d.user,
+        token: d.token,
+      };
+      return res.json(responsePayload);
     })
     .catch(next);
 };
@@ -204,7 +220,7 @@ router.post(
 
 router.get(
   '/',
-  ...auth0(),
+  ...authAdmin(),
   (req, res, next) => {
     accountService
       .getAll()
@@ -226,12 +242,10 @@ const ensureSelfOrAdmin = (req: Request) => {
 
 router.get(
   '/:id',
+  ...auth0(),
   (req, res, next) => {
     try {
-      const id = Number(req.params.id);
-      if (Number.isNaN(id)) {
-        return (next as (e: string) => void)('Invalid id');
-      }
+      const id = ensureSelfOrAdmin(req);
       return accountService
         .getById(id)
         .then((r) => res.json(r))

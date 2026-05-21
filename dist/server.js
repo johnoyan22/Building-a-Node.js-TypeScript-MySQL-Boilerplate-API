@@ -13,7 +13,26 @@ const accounts_controller_1 = __importDefault(require("./accounts/accounts.contr
 const swagger_1 = require("./_helpers/swagger");
 const app = (0, express_1.default)();
 app.use((0, morgan_1.default)('dev'));
-app.use((0, cors_1.default)({ origin: true, credentials: true }));
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [];
+const isProd = process.env.NODE_ENV === 'production';
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, curl, postman)
+        if (!origin)
+            return callback(null, true);
+        // In development or if ALLOWED_ORIGINS is not set, allow the requesting origin
+        if (!isProd || allowedOrigins.length === 0) {
+            return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+}));
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
 app.use((0, cookie_parser_1.default)());
