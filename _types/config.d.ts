@@ -10,4 +10,5 @@ export type AppConfig = {
   emailFrom: string;
   emailTo: string;
   resendApiKey: string;
+  apiUrl: string;
 };

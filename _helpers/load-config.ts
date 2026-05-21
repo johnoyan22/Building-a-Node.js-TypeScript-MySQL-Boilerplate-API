@@ -16,4 +16,5 @@ export const config: AppConfig = {
   emailFrom: process.env.EMAIL_FROM || 'onboarding@resend.dev',
   emailTo: process.env.EMAIL_TO || '',
   resendApiKey: process.env.RESEND_API_KEY || process.env.SMTP_PASS || '',
+  apiUrl: process.env.API_URL || 'http://localhost:4000',
 };
