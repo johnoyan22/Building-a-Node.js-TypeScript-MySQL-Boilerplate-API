@@ -37,7 +37,7 @@ export const initialize = async () => {
 
   db.sequelize = sequelize;
 
-  await sequelize.sync();
+  await sequelize.sync({ alter: true });
 };
 
 export const getSequelize = () => {

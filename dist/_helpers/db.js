@@ -35,7 +35,7 @@ const initialize = async () => {
     exports.db.Account.hasMany(exports.db.RefreshToken, { foreignKey: 'accountId', onDelete: 'CASCADE' });
     exports.db.RefreshToken.belongsTo(exports.db.Account, { foreignKey: 'accountId' });
     exports.db.sequelize = sequelize;
-    await sequelize.sync();
+    await sequelize.sync({ alter: true });
 };
 exports.initialize = initialize;
 const getSequelize = () => {
