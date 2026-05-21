@@ -8,10 +8,6 @@
   },
   "secret": "OYAN, JOHN TIMOTHY P.",
   "emailFrom": "noreply@example.com",
-  "smtp": {
-    "host": "smtp.ethereal.email",
-    "port": 587,
-    "user": "conor.huels@ethereal.email",
-    "pass": "brmrStVaZxRsXe6Rvg"
-  }
+  "emailTo": "",
+  "resendApiKey": ""
 }

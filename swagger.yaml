@@ -11,7 +11,7 @@ servers:
 paths:
   /accounts/register:
     post:
-      summary: Register; sends verification email (configure SMTP in config.json)
+      summary: Register; sends verification email (configure Resend API key in config.json or .env)
       requestBody:
         required: true
         content:

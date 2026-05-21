@@ -14,10 +14,6 @@ export const config: AppConfig = {
   },
   secret: process.env.JWT_SECRET || 'secret',
   emailFrom: process.env.EMAIL_FROM || 'onboarding@resend.dev',
-  smtp: {
-    host: process.env.SMTP_HOST || 'smtp.resend.com',
-    port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 465,
-    user: process.env.SMTP_USER || 'resend',
-    pass: process.env.SMTP_PASS || '',
-  },
+  emailTo: process.env.EMAIL_TO || '',
+  resendApiKey: process.env.RESEND_API_KEY || process.env.SMTP_PASS || '',
 };

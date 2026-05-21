@@ -8,10 +8,6 @@ export type AppConfig = {
   };
   secret: string;
   emailFrom: string;
-  smtp: {
-    host: string;
-    port: number;
-    user: string;
-    pass: string;
-  };
+  emailTo: string;
+  resendApiKey: string;
 };

@@ -113,7 +113,7 @@ export const accountService = {
     try {
       await sendVerification(a, verificationToken);
     } catch (err) {
-      // Keep local development unblocked when SMTP is not configured.
+      // Keep local development unblocked when Resend API is not configured.
       // Account is still created; user can verify via token endpoints.
       // eslint-disable-next-line no-console
       console.warn('Verification email was not sent:', err);
