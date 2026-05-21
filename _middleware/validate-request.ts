@@ -1,13 +1,20 @@
-import { NextFunction, Request } from 'express';
-import { ObjectSchema } from 'joi';
+import type { Request, NextFunction } from "express";
+import Joi from "joi";
 
-export function validateRequest(req: Request, next: NextFunction, schema: ObjectSchema): void {
-  const { error, value } = schema.validate(req.body, { abortEarly: false, stripUnknown: true, convert: true });
-  if (error) {
-    const details = error.details.map((d) => d.message).join('; ');
-    next(`Validation: ${details}`);
-    return;
+export function validateRequest(req: Request, next: NextFunction, schema: Joi.ObjectSchema): void {
+  const options = {
+    abortEarly: false,
+    allowUnknown: true,
+    stripUnknown: true
   }
-  (req as Request & { body: unknown }).body = value;
-  next();
+
+  const { error, value } = schema.validate(req.body, options)
+
+  if (error) {
+    next(`Validation Error: ${error.details.map((d) => d.message).join(", ")}`)
+  } else {
+    req.body = value
+    next()
+  }
+
 }

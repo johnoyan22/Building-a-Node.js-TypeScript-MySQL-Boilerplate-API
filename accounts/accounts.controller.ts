@@ -1,338 +1,231 @@
-import { Request, Response, NextFunction, Router, CookieOptions, type RequestHandler } from 'express';
+import express from 'express';
+const router = express.Router();
 import Joi from 'joi';
-import { accountService } from './account.service';
-import { validateRequest } from '../_middleware/validate-request';
-import { authorize } from '../_middleware/authorize';
-import { Role, type Role as RoleType } from '../_helpers/role';
+import { validateRequest } from "../_middleware/validate-request";
+import authorize from '../_middleware/authorize';
+import { Role } from '../_helpers/role';
+import accountService from './account.service';
 
-const router = Router();
-
-const auth0 = () => authorize() as [RequestHandler, RequestHandler];
-const authAdmin = () => authorize(Role.Admin) as [RequestHandler, RequestHandler];
-
-const isProd = process.env.NODE_ENV === 'production';
-const refreshCookie: CookieOptions = {
-  httpOnly: true,
-  sameSite: isProd ? 'none' : 'lax',
-  secure: isProd,
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-};
-
-const clientIp = (req: Request) => {
-  const h = req.headers['x-forwarded-for'];
-  if (typeof h === 'string' && h.length) {
-    return h.split(',')[0].trim();
-  }
-  if (Array.isArray(h) && h[0]) {
-    return h[0].split(',')[0].trim();
-  }
-  return req.ip || '0.0.0.0';
-};
-
-function registerSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(
-    req,
-    next,
-    Joi.object({
-      title: Joi.string().min(1).max(10).default('Mr'),
-      firstName: Joi.string().min(1).max(50).required(),
-      lastName: Joi.string().min(1).max(50).required(),
-      email: Joi.string().email().required(),
-      password: Joi.string().min(6).max(200).required(),
-    })
-  );
-}
-
-router.post('/register', registerSchema, (req, res, next) => {
-  const { body } = req;
-  accountService
-    .register(body)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-
-function verifySchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(req, next, Joi.object({ token: Joi.string().required() }));
-}
-router.get('/verify-email', (req, res, next) => {
-  const token = String(req.query.token ?? '');
-  if (!token) {
-    return (next as (e: string) => void)('Validation: "token" is required');
-  }
-  return accountService
-    .verifyEmail(token)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-router.post('/verify-email', verifySchema, (req, res, next) => {
-  accountService
-    .verifyEmail(req.body.token)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-
-function authenticateSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(
-    req,
-    next,
-    Joi.object({ email: Joi.string().email().required(), password: Joi.string().required() })
-  );
-}
-router.post('/authenticate', authenticateSchema, (req, res, next) => {
-  accountService
-    .authenticate({ email: req.body.email, password: req.body.password, ipAddress: clientIp(req) })
-    .then((d) => {
-      const { refreshToken, ...rest } = d;
-      if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
-        res.cookie('refreshToken', refreshToken, refreshCookie);
-      }
-      return res.json({ ...rest, refreshToken });
-    })
-    .catch(next);
-});
-// Backward-compatible alias for common typo in clients.
-router.post('/aunthenticate', authenticateSchema, (req, res, next) => {
-  accountService
-    .authenticate({ email: req.body.email, password: req.body.password, ipAddress: clientIp(req) })
-    .then((d) => {
-      const { refreshToken, ...rest } = d;
-      if (typeof refreshToken === 'string' && (rest as { jwToken: string }).jwToken) {
-        res.cookie('refreshToken', refreshToken, refreshCookie);
-      }
-      return res.json({ ...rest, refreshToken });
-    })
-    .catch(next);
-});
-
-function forgotSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(req, next, Joi.object({ email: Joi.string().email().required() }));
-}
-router.post('/forgot-password', forgotSchema, (req, res, next) => {
-  accountService
-    .forgotPassword(req.body.email)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-
-function resetSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(
-    req,
-    next,
-    Joi.object({
-      token: Joi.string().required(),
-      password: Joi.string().min(6).required(),
-      confirmPassword: Joi.string().min(6).required(),
-    })
-  );
-}
-router.post('/reset-password', resetSchema, (req, res, next) => {
-  accountService
-    .resetPassword(req.body)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-
-router.post(
-  '/validate-reset-token',
-  (req, res, next) => {
-    validateRequest(req, next, Joi.object({ token: Joi.string().required() }));
-  },
-  (req, res, next) => {
-    accountService
-      .validateResetToken(req.body.token)
-      .then((r) => res.json(r))
-      .catch(next);
-  }
-);
-router.get('/validate-reset-token', (req, res, next) => {
-  const token = String(req.query.token ?? '');
-  if (!token) {
-    return (next as (e: string) => void)('Validation: "token" is required');
-  }
-  return accountService
-    .validateResetToken(token)
-    .then((r) => res.json(r))
-    .catch(next);
-});
-
-const refreshTokenHandler: RequestHandler = (req, res, next) => {
-  const body = (req.body ?? {}) as { refreshToken?: string };
-  const t = (req as Request & { cookies?: { refreshToken?: string } }).cookies?.refreshToken || body.refreshToken;
-  if (!t) {
-    return (next as (e: string) => void)('Invalid or missing refresh token');
-  }
-  return accountService
-    .refreshToken({ token: t, ipAddress: clientIp(req) })
-    .then((d) => {
-      if (d.refreshToken) {
-        res.cookie('refreshToken', d.refreshToken, refreshCookie);
-      }
-      const user = d.user as Record<string, any>;
-      const responsePayload = {
-        id: user.id,
-        title: user.title,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-        created: user.createdAt ?? user.created ?? null,
-        updated: user.updatedAt ?? user.updated ?? null,
-        isVerified: user.verified != null || user.isVerified === true,
-        jwToken: d.token,
-        refreshToken: d.refreshToken,
-        user: d.user,
-        token: d.token,
-      };
-      return res.json(responsePayload);
-    })
-    .catch(next);
-};
-router.post('/refresh-token', refreshTokenHandler);
-router.get('/refresh-token', refreshTokenHandler);
-
-router.post(
-  '/revoke-token',
-  ...auth0(),
-  (req, res, next) => {
-    const fromBody = ((req.body ?? {}) as { refreshToken?: string }).refreshToken;
-    const c = (req as Request & { cookies?: { refreshToken?: string } }).cookies;
-    const token = (fromBody !== undefined && fromBody !== null && fromBody !== '' ? fromBody : c?.refreshToken) as string | undefined;
-    if (token == null || token === '') {
-      return (next as (e: string) => void)('Refresh token required (body or cookie)');
-    }
-    return accountService
-      .revokeToken({
-        token: token,
-        ipAddress: clientIp(req),
-        callerId: req.user!.id,
-        isAdmin: req.user!.role === Role.Admin,
-      })
-      .then((r) => {
-        if (c?.refreshToken && c.refreshToken === token) {
-          res.clearCookie('refreshToken', { path: '/' });
-        }
-        return res.json(r);
-      })
-      .catch(next);
-  }
-);
-
-router.get(
-  '/',
-  ...authAdmin(),
-  (req, res, next) => {
-    accountService
-      .getAll()
-      .then((r) => res.json(r))
-      .catch(next);
-  }
-);
-
-const ensureSelfOrAdmin = (req: Request) => {
-  const id = Number(req.params.id);
-  if (Number.isNaN(id)) {
-    throw 'Invalid id';
-  }
-  if (req.user!.role !== Role.Admin && req.user!.id !== id) {
-    throw 'Unauthorized';
-  }
-  return id;
-};
-
-router.get(
-  '/:id',
-  ...auth0(),
-  (req, res, next) => {
-    try {
-      const id = ensureSelfOrAdmin(req);
-      return accountService
-        .getById(id)
-        .then((r) => res.json(r))
-        .catch(next);
-    } catch (e) {
-      return (next as (e: string) => void)(e as string);
-    }
-  }
-);
-
-const createBody = Joi.object({
-  title: Joi.string().min(1).default('Mr'),
-  firstName: Joi.string().required(),
-  lastName: Joi.string().required(),
-  email: Joi.string().email().required(),
-  password: Joi.string().min(6).required(),
-  role: Joi.string().valid('Admin', 'User').default('User'),
-});
-function createSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(req, next, createBody);
-}
-router.post(
-  '/',
-  ...authAdmin(),
-  createSchema,
-  (req, res, next) => {
-    accountService
-      .create(req.body)
-      .then((r) => res.json(r))
-      .catch(next);
-  }
-);
-
-const updateJoi = Joi.object({
-  title: Joi.string(),
-  firstName: Joi.string(),
-  lastName: Joi.string(),
-  email: Joi.string().email(),
-  password: Joi.string().min(6).allow(''),
-  role: Joi.string().valid('Admin', 'User'),
-}).min(1);
-function updateSchema(req: Request, res: Response, next: NextFunction) {
-  validateRequest(req, next, updateJoi);
-}
-router.put(
-  '/:id',
-  ...auth0(),
-  updateSchema,
-  (req, res, next) => {
-    const id = Number(req.params.id);
-    if (Number.isNaN(id)) {
-      return (next as (e: string) => void)('Invalid id');
-    }
-    if (req.user!.role !== Role.Admin && req.user!.id !== id) {
-      return (next as (e: string) => void)('Unauthorized');
-    }
-    const b = { ...req.body } as { role?: RoleType; [k: string]: unknown };
-    if (req.user!.role !== Role.Admin) {
-      delete b.role;
-    }
-    return accountService
-      .update(
-        id,
-        b,
-        { caller: { id: req.user!.id, role: req.user!.role }, canChangeRole: req.user!.role === Role.Admin }
-      )
-      .then((r) => res.json(r))
-      .catch(next);
-  }
-);
-
-router.delete(
-  '/:id',
-  ...auth0(),
-  (req, res, next) => {
-    const id = Number(req.params.id);
-    if (Number.isNaN(id)) {
-      return (next as (e: string) => void)('Invalid id');
-    }
-    if (req.user!.role !== Role.Admin && req.user!.id !== id) {
-      return (next as (e: string) => void)('Unauthorized');
-    }
-    return accountService
-      ._delete(id)
-      .then((r) => res.json(r))
-      .catch(next);
-  }
-);
+router.post('/authenticate', authenticateSchema, authenticate);
+router.post('/refresh-token', refreshToken);
+router.post('/revoke-token', authorize(), revokeTokenSchema, revokeToken);
+router.post('/register', registerSchema, register);
+router.post('/verify-email', verifyEmailSchema, verifyEmail);
+router.post('/forgot-password', forgotPasswordSchema, forgotPassword);
+router.post('/validate-reset-token', validateResetTokenSchema, validateResetToken);
+router.post('/reset-password', resetPasswordSchema, resetPassword);
+router.get('/', authorize(Role.Admin), getAll);
+router.get('/:id', authorize(), getById);
+router.post('/', authorize(Role.Admin), createSchema, create);
+router.put('/:id', authorize(), updateSchema, update);
+router.delete('/:id', authorize(), _delete);
 
 export default router;
+
+function authenticateSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    email: Joi.string().required(),
+    password: Joi.string().required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function authenticate(req: any, res: any, next: any) {
+  const { email, password } = req.body;
+  const ipAddress = req.ip;
+  accountService.authenticate({ email, password, ipAddress })
+    .then(({ refreshToken, ...account }: any) => {
+      setTokenCookie(res, refreshToken);
+      res.json(account);
+    })
+    .catch(next);
+}
+
+function refreshToken(req: any, res: any, next: any) {
+  const token = req.cookies.refreshToken;
+  const ipAddress = req.ip;
+  accountService.refreshToken({ token, ipAddress })
+    .then(({ refreshToken, ...account }: any) => {
+      setTokenCookie(res, refreshToken);
+      res.json(account);
+    })
+    .catch(next);
+}
+
+function revokeTokenSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    token: Joi.string().empty('')
+  });
+  validateRequest(req, next, schema);
+}
+
+function revokeToken(req: any, res: any, next: any) {
+  const token = req.body.token || req.cookies.refreshToken;
+  const ipAddress = req.ip;
+
+  if (!token) return res.status(400).json({ message: 'Token is required' });
+
+  if (!req.user.ownsToken(token) && req.user.role !== Role.Admin) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  accountService.revokeToken({ token, ipAddress })
+    .then(() => res.json({ message: 'Token revoked' }))
+    .catch(next);
+}
+
+function registerSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    title: Joi.string().required(),
+    firstName: Joi.string().required(),
+    lastName: Joi.string().required(),
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    confirmPassword: Joi.string().valid(Joi.ref('password')).required(),
+    acceptTerms: Joi.boolean().valid(true).required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function register(req: any, res: any, next: any) {
+  accountService.register(req.body, req.get('origin'))
+    .then(() => res.json({ message: 'Registration successful, please check your email for verification instructions' }))
+    .catch(next);
+}
+
+function verifyEmailSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    token: Joi.string().required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function verifyEmail(req: any, res: any, next: any) {
+  accountService.verifyEmail(req.body)
+    .then(() => res.json({ message: 'Verification successful, you can now login' }))
+    .catch(next);
+}
+
+function forgotPasswordSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    email: Joi.string().email().required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function forgotPassword(req: any, res: any, next: any) {
+  accountService.forgotPassword(req.body, req.get('origin'))
+    .then(() => res.json({ message: 'Please check your email for password reset instructions' }))
+    .catch(next);
+}
+
+function validateResetTokenSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    token: Joi.string().required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function validateResetToken(req: any, res: any, next: any) {
+  accountService.validateResetToken(req.body)
+    .then(() => res.json({ message: 'Token is valid' }))
+    .catch(next);
+}
+
+function resetPasswordSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    token: Joi.string().required(),
+    password: Joi.string().min(6).required(),
+    confirmPassword: Joi.string().valid(Joi.ref('password')).required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function resetPassword(req: any, res: any, next: any) {
+  accountService.resetPassword(req.body)
+    .then(() => res.json({ message: 'Password reset successful, you can now login' }))
+    .catch(next);
+}
+
+function getAll(req: any, res: any, next: any) {
+  accountService.getAll()
+    .then((accounts: any) => res.json(accounts))
+    .catch(next);
+}
+
+function getById(req: any, res: any, next: any) {
+  if (Number(req.params.id) !== req.user.id && req.user.role !== Role.Admin) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  accountService.getById(req.params.id)
+    .then((account: any) => account ? res.json(account) : res.sendStatus(404))
+    .catch(next);
+}
+
+function createSchema(req: any, res: any, next: any) {
+  const schema = Joi.object({
+    title: Joi.string().required(),
+    firstName: Joi.string().required(),
+    lastName: Joi.string().required(),
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    confirmPassword: Joi.string().valid(Joi.ref('password')).required(),
+    role: Joi.string().valid(Role.Admin, Role.User).required()
+  });
+  validateRequest(req, next, schema);
+}
+
+function create(req: any, res: any, next: any) {
+  accountService.create(req.body)
+    .then((account: any) => res.json(account))
+    .catch(next);
+}
+
+function updateSchema(req: any, res: any, next: any) {
+  const schemaRules: any = {
+    title: Joi.string().empty(''),
+    firstName: Joi.string().empty(''),
+    lastName: Joi.string().empty(''),
+    email: Joi.string().email().empty(''),
+    password: Joi.string().min(6).empty(''),
+    confirmPassword: Joi.string().valid(Joi.ref('password')).empty('')
+  };
+
+  if (req.user.role === Role.Admin) {
+    schemaRules.role = Joi.string().valid(Role.Admin, Role.User).empty('');
+  }
+
+  const schema = Joi.object(schemaRules).with('password', 'confirmPassword');
+  validateRequest(req, next, schema);
+}
+
+function update(req: any, res: any, next: any) {
+  if (Number(req.params.id) !== req.user.id && req.user.role !== Role.Admin) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  accountService.update(req.params.id, req.body)
+    .then((account: any) => res.json(account))
+    .catch(next);
+}
+
+function _delete(req: any, res: any, next: any) {
+  if (Number(req.params.id) !== req.user.id && req.user.role !== Role.Admin) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  accountService.delete(req.params.id)
+    .then(() => res.json({ message: 'Account deleted successfully' }))
+    .catch(next);
+}
+
+function setTokenCookie(res: any, token: any) {
+  const cookieOptions = {
+    httpOnly: true,
+    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    secure: true,
+    sameSite: 'none' as const
+  };
+  res.cookie('refreshToken', token, cookieOptions);
+}

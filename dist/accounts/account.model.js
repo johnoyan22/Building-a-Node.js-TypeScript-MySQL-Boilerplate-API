@@ -1,36 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initAccountModel = exports.Account = void 0;
+exports.default = model;
 const sequelize_1 = require("sequelize");
-const role_1 = require("../_helpers/role");
-class Account extends sequelize_1.Model {
-    get isVerified() {
-        return this.verified != null;
-    }
-    get isAdmin() {
-        return this.role === role_1.Role.Admin;
-    }
-}
-exports.Account = Account;
-const initAccountModel = (sequelize) => {
-    Account.init({
-        id: { type: sequelize_1.DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-        title: { type: sequelize_1.DataTypes.STRING(30), allowNull: false, defaultValue: 'Mr' },
-        firstName: { type: sequelize_1.DataTypes.STRING(50), allowNull: false },
-        lastName: { type: sequelize_1.DataTypes.STRING(50), allowNull: false },
-        email: { type: sequelize_1.DataTypes.STRING(255), allowNull: false, unique: true, validate: { isEmail: true } },
-        passwordHash: { type: sequelize_1.DataTypes.STRING(255), allowNull: false },
-        role: { type: sequelize_1.DataTypes.ENUM('Admin', 'User'), allowNull: false, defaultValue: 'User' },
-        verificationToken: { type: sequelize_1.DataTypes.STRING(255) },
+function model(sequelize) {
+    const attributes = {
+        email: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        passwordHash: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        title: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        firstName: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        lastName: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        acceptTerms: { type: sequelize_1.DataTypes.BOOLEAN },
+        role: { type: sequelize_1.DataTypes.STRING, allowNull: false },
+        verificationToken: { type: sequelize_1.DataTypes.STRING },
         verified: { type: sequelize_1.DataTypes.DATE },
-        resetToken: { type: sequelize_1.DataTypes.STRING(255) },
+        resetToken: { type: sequelize_1.DataTypes.STRING },
         resetTokenExpires: { type: sequelize_1.DataTypes.DATE },
-    }, {
-        sequelize,
-        tableName: 'accounts',
+        passwordReset: { type: sequelize_1.DataTypes.DATE },
+        created: { type: sequelize_1.DataTypes.DATE, allowNull: false, defaultValue: sequelize_1.DataTypes.NOW },
+        updated: { type: sequelize_1.DataTypes.DATE },
+        isVerified: {
+            type: sequelize_1.DataTypes.VIRTUAL,
+            get() { return !!(this.verified || this.passwordReset); }
+        }
+    };
+    const options = {
+        timestamps: false,
         defaultScope: { attributes: { exclude: ['passwordHash'] } },
-        scopes: { withHash: { attributes: { include: ['passwordHash'] } } },
-    });
-    return Account;
-};
-exports.initAccountModel = initAccountModel;
+        scopes: { withHash: { attributes: {}, } }
+    };
+    return sequelize.define('account', attributes, options);
+}

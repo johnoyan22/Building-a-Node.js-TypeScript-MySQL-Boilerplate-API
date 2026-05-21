@@ -1,40 +1,34 @@
-import { NextFunction, Request, Response } from 'express';
 import { expressjwt } from 'express-jwt';
-import { config } from '../_helpers/load-config';
-import { Account } from '../_helpers/db';
-import { type Role as RoleType } from '../_helpers/role';
+// import config from '../../config.prod.json';
+import { db } from '../_helpers/db';
 
-const jwtCheck = expressjwt({
-  secret: config.secret,
-  algorithms: ['HS256'],
-  requestProperty: 'user',
-});
 
-type JwtUser = { sub: string; id: number; role: RoleType; iat: number; exp: number };
+export default function authorize(roles: any = []) {
+  if (typeof roles === 'string') {
+    roles = [roles];
+  }
 
-export const authorize = (...allowedRoles: RoleType[]) => {
-  const needFilter = allowedRoles.length > 0;
-  const allow = new Set(allowedRoles);
+  const secret = process.env.JWT_SECRET ?? '';
 
   return [
-    jwtCheck as (req: Request, res: Response, next: NextFunction) => void,
-    async (req: Request, res: Response, next: NextFunction) => {
-      const payload = (req as Request & { user: JwtUser }).user;
-      const id = payload?.id ?? Number.parseInt(String(payload.sub), 10);
-      if (!id) {
+    expressjwt({ secret, algorithms: ['HS256'] }),
+    async (req: any, res: any, next: any) => {
+      const account = await db.Account.findByPk(req.auth.id);
+
+      if (!account || (roles.length && !roles.includes(account.role))) {
         return res.status(401).json({ message: 'Unauthorized' });
       }
-      const a = await Account.findByPk(id);
-      if (!a) {
-        return res.status(401).json({ message: 'Unauthorized' });
-      }
-      const u = a.toJSON() as { id: number; role: RoleType };
-      if (needFilter && !allow.has(u.role)) {
-        return res.status(403).json({ message: 'Forbidden: insufficient role' });
-      }
-      const ownsToken = (d: { token: string; accountId: number }) => d.accountId === u.id;
-      req.user = { id: u.id, sub: String(u.id), role: u.role, ownsToken };
+
+      const refreshTokens = await account.getRefreshTokens();
+
+
+      req.user = {
+        ...req.auth,
+        role: account.role,
+        ownsToken: (token: any) => !!refreshTokens.find((x: any) => x.token === token)
+      };
+
       next();
-    },
+    }
   ];
-};
+}

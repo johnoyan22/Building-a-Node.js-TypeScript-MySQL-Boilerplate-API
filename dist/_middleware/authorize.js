@@ -1,37 +1,28 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.authorize = void 0;
+exports.default = authorize;
 const express_jwt_1 = require("express-jwt");
-const load_config_1 = require("../_helpers/load-config");
+// import config from '../../config.prod.json';
 const db_1 = require("../_helpers/db");
-const jwtCheck = (0, express_jwt_1.expressjwt)({
-    secret: load_config_1.config.secret,
-    algorithms: ['HS256'],
-    requestProperty: 'user',
-});
-const authorize = (...allowedRoles) => {
-    const needFilter = allowedRoles.length > 0;
-    const allow = new Set(allowedRoles);
+function authorize(roles = []) {
+    if (typeof roles === 'string') {
+        roles = [roles];
+    }
+    const secret = process.env.JWT_SECRET ?? '';
     return [
-        jwtCheck,
+        (0, express_jwt_1.expressjwt)({ secret, algorithms: ['HS256'] }),
         async (req, res, next) => {
-            const payload = req.user;
-            const id = payload?.id ?? Number.parseInt(String(payload.sub), 10);
-            if (!id) {
+            const account = await db_1.db.Account.findByPk(req.auth.id);
+            if (!account || (roles.length && !roles.includes(account.role))) {
                 return res.status(401).json({ message: 'Unauthorized' });
             }
-            const a = await db_1.Account.findByPk(id);
-            if (!a) {
-                return res.status(401).json({ message: 'Unauthorized' });
-            }
-            const u = a.toJSON();
-            if (needFilter && !allow.has(u.role)) {
-                return res.status(403).json({ message: 'Forbidden: insufficient role' });
-            }
-            const ownsToken = (d) => d.accountId === u.id;
-            req.user = { id: u.id, sub: String(u.id), role: u.role, ownsToken };
+            const refreshTokens = await account.getRefreshTokens();
+            req.user = {
+                ...req.auth,
+                role: account.role,
+                ownsToken: (token) => !!refreshTokens.find((x) => x.token === token)
+            };
             next();
-        },
+        }
     ];
-};
-exports.authorize = authorize;
+}

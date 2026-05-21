@@ -3,256 +3,233 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.accountService = void 0;
-const sequelize_1 = require("sequelize");
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
+// import config from "../../config.prod.json";
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const crypto_1 = require("crypto");
-const load_config_1 = require("../_helpers/load-config");
-const role_1 = require("../_helpers/role");
-const send_email_1 = require("../_helpers/send-email");
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
+const sequelize_1 = require("sequelize");
+const send_email_1 = __importDefault(require("../_helpers/send-email"));
 const db_1 = require("../_helpers/db");
-const accLabel = (a) => `${a.firstName} ${a.lastName}`.trim();
-const basic = (a) => a.toJSON();
-const authView = (a, jwToken) => {
-    const raw = a.toJSON();
+const role_1 = require("../_helpers/role");
+exports.default = {
+    authenticate,
+    refreshToken,
+    revokeToken,
+    register,
+    verifyEmail,
+    forgotPassword,
+    validateResetToken,
+    resetPassword,
+    getAll,
+    getById,
+    create,
+    update,
+    delete: _delete
+};
+async function authenticate({ email, password, ipAddress }) {
+    const account = await db_1.db.Account.scope('withHash').findOne({ where: { email } });
+    if (!account || !account.isVerified || !(await bcryptjs_1.default.compare(password, account.passwordHash))) {
+        throw 'Email or password is incorrect';
+    }
+    const jwtToken = generateJwtToken(account);
+    const refreshToken = generateRefreshToken(account, ipAddress);
+    await refreshToken.save();
     return {
-        id: raw.id,
-        title: raw.title,
-        firstName: raw.firstName,
-        lastName: raw.lastName,
-        email: raw.email,
-        role: raw.role,
-        created: raw.createdAt ?? null,
-        updated: raw.updatedAt ?? null,
-        isVerified: raw.verified != null,
-        jwToken,
+        ...basicDetails(account),
+        jwtToken,
+        refreshToken: refreshToken.token
     };
-};
-const hashPassword = (plain) => bcryptjs_1.default.hashSync(plain, 10);
-const randomString = (bytes = 20) => (0, crypto_1.randomBytes)(Math.ceil(bytes / 2)).toString('hex').slice(0, bytes);
-const generateJwt = (a) => jsonwebtoken_1.default.sign({ sub: String(a.id), id: a.id, role: a.role }, load_config_1.config.secret, { expiresIn: '15m' });
-async function sendVerification(a, vToken) {
-    const link = `http://localhost:4000/accounts/verify-email?token=${encodeURIComponent(vToken)}`;
-    const html = `
-    <h3>Verify Email</h3>
-    <p>Thanks for registering!</p>
-    <p>Please use the below token to verify your email address with the <code>/accounts/verify-email</code> api route:</p>
-    <p><code>${vToken}</code></p>
-    <p>Or click this link to verify directly:</p>
-    <p><a href="${link}">${link}</a></p>
-  `;
-    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Sign-up Verification API - Verify Email', html });
 }
-async function sendPasswordReset(a) {
-    const t = a.resetToken;
-    const link = `http://localhost:4000/accounts/validate-reset-token?token=${encodeURIComponent(t)}`;
-    const html = `
-    <h3>Reset Password</h3>
-    <p>Hi ${accLabel(a)}</p>
-    <p>Please use the token below with the <code>/accounts/reset-password</code> api route:</p>
-    <p><code>${t}</code></p>
-    <p>Or click this link to validate the reset token first:</p>
-    <p><a href="${link}">${link}</a></p>
-  `;
-    await (0, send_email_1.sendEmail)({ to: a.email, subject: 'Sign-up Verification API - Reset Password', html });
+async function refreshToken({ token, ipAddress }) {
+    const refreshToken = await getRefreshToken(token);
+    const account = await refreshToken.getAccount();
+    const newRefreshToken = generateRefreshToken(account, ipAddress);
+    refreshToken.revoked = Date.now();
+    refreshToken.revokedByIp = ipAddress;
+    refreshToken.replacedByToken = newRefreshToken.token;
+    await refreshToken.save();
+    await newRefreshToken.save();
+    const jwtToken = generateJwtToken(account);
+    return {
+        ...basicDetails(account),
+        jwtToken,
+        refreshToken: newRefreshToken.token
+    };
 }
-async function buildRefresh(account, ipAddress) {
-    const token = randomString(64);
-    const expires = new Date();
-    expires.setDate(expires.getDate() + 7);
-    await db_1.RefreshToken.create({
-        accountId: account.id,
-        token,
-        expires,
-        createdByIp: ipAddress,
+async function revokeToken({ token, ipAddress }) {
+    const refreshToken = await getRefreshToken(token);
+    refreshToken.revoked = Date.now();
+    refreshToken.revokedByIp = ipAddress;
+    await refreshToken.save();
+}
+async function register(params, origin) {
+    if (await db_1.db.Account.findOne({ where: { email: params.email } })) {
+        return await sendAlreadyRegisteredEmail(params.email, origin);
+    }
+    const account = new db_1.db.Account(params);
+    const isFirstAccount = (await db_1.db.Account.count()) === 0;
+    account.role = isFirstAccount ? role_1.Role.Admin : role_1.Role.User;
+    account.verificationToken = randomTokenString();
+    account.passwordHash = await hash(params.password);
+    await account.save();
+    // await sendVerificationEmail(account, origin);
+    sendVerificationEmail(account, origin).catch(err => console.error('Failed to send verification email:', err));
+}
+async function verifyEmail({ token }) {
+    const account = await db_1.db.Account.findOne({ where: { verificationToken: token } });
+    if (!account)
+        throw 'Verification failed';
+    account.verified = Date.now();
+    account.verificationToken = null;
+    await account.save();
+}
+async function forgotPassword({ email }, origin) {
+    const account = await db_1.db.Account.findOne({ where: { email } });
+    if (!account)
+        return;
+    account.resetToken = randomTokenString();
+    account.resetTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await account.save();
+    // await sendPasswordResetEmail(account, origin);
+    sendPasswordResetEmail(account, origin).catch(err => console.error('Failed to send password reset email:', err));
+}
+async function validateResetToken({ token }) {
+    const account = await db_1.db.Account.findOne({
+        where: {
+            resetToken: token,
+            resetTokenExpires: { [sequelize_1.Op.gt]: Date.now() }
+        }
     });
-    return { token, expires, account };
+    if (!account)
+        throw 'Invalid token';
+    return account;
 }
-exports.accountService = {
-    async authenticate({ email, password, ipAddress }) {
-        const a = await db_1.Account.scope('withHash').findOne({ where: { email: email.toLowerCase() } });
-        if (!a || !bcryptjs_1.default.compareSync(password, a.passwordHash))
-            throw 'Email or password is incorrect';
-        if (!a.verified)
-            throw 'Not verified. Please check your email';
-        const jwtT = generateJwt(a);
-        const { token: refreshToken, expires, account } = await buildRefresh(a, ipAddress);
-        return {
-            ...authView(account, jwtT),
-            refreshToken,
-            refreshTokenExpires: expires.getTime(),
-        };
-    },
-    async register(params) {
-        const { title, firstName, lastName, email, password } = params;
-        if (await db_1.Account.findOne({ where: { email: email.toLowerCase() } })) {
-            throw `Email "${email}" is already registered`;
-        }
-        const count = await db_1.Account.count();
-        const role = count === 0 ? role_1.Role.Admin : role_1.Role.User;
-        const verificationToken = randomString(32);
-        const a = (await db_1.Account.create({
-            title: title || 'Mr',
-            firstName,
-            lastName,
-            email: email.toLowerCase(),
-            passwordHash: hashPassword(password),
-            role,
-            verificationToken,
-            verified: null,
-        }));
-        try {
-            await sendVerification(a, verificationToken);
-        }
-        catch (err) {
-            // Keep local development unblocked when SMTP is not configured.
-            // Account is still created; user can verify via token endpoints.
-            // eslint-disable-next-line no-console
-            console.warn('Verification email was not sent:', err);
-        }
-        return { message: 'Registration successful, please check your email for verification instructions' };
-    },
-    async verifyEmail(token) {
-        const a = await db_1.Account.findOne({ where: { verificationToken: token } });
-        if (!a)
-            throw 'Verification failed: invalid token';
-        a.verified = new Date();
-        a.verificationToken = null;
-        await a.save();
-        return { message: 'Verification successful' };
-    },
-    async forgotPassword(email) {
-        const a = await db_1.Account.findOne({ where: { email: email.toLowerCase() } });
-        if (a) {
-            a.resetToken = randomString(20);
-            a.resetTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-            await a.save();
-            await sendPasswordReset(a);
-        }
-        return { message: 'Please check your email for password reset instructions' };
-    },
-    async validateResetToken(token) {
-        const a = await db_1.Account.findOne({
-            where: { resetToken: token, resetTokenExpires: { [sequelize_1.Op.gt]: new Date() } },
-        });
-        if (!a)
-            throw 'Invalid or expired token';
-        return { message: 'Token is valid' };
-    },
-    async resetPassword(params) {
-        const { token, password, confirmPassword } = params;
-        if (password !== confirmPassword)
-            throw "Passwords don't match";
-        const a = await db_1.Account.findOne({
-            where: { resetToken: token, resetTokenExpires: { [sequelize_1.Op.gt]: new Date() } },
-        });
-        if (!a)
-            throw 'Invalid or expired token';
-        a.passwordHash = hashPassword(password);
-        a.resetToken = null;
-        a.resetTokenExpires = null;
-        await a.save();
-        return { message: 'Password reset successful' };
-    },
-    async getAll() {
-        return (await db_1.Account.findAll()).map((a) => basic(a));
-    },
-    async getById(id) {
-        const a = await db_1.Account.findByPk(id);
-        if (!a)
-            throw 'Account not found';
-        return basic(a);
-    },
-    async create(data, transaction) {
-        if (await db_1.Account.findOne({ where: { email: data.email.toLowerCase() } })) {
-            throw `Email "${data.email}" is already taken`;
-        }
-        const a = (await db_1.Account.create({
-            title: data.title || 'Mr',
-            firstName: data.firstName,
-            lastName: data.lastName,
-            email: data.email.toLowerCase(),
-            passwordHash: hashPassword(data.password),
-            role: data.role,
-            verificationToken: null,
-            verified: new Date(),
-        }, transaction ? { transaction } : undefined));
-        return basic(a);
-    },
-    async update(id, data, { caller, canChangeRole }) {
-        const a = (await db_1.Account.scope('withHash').findByPk(id));
-        if (!a)
-            throw 'Account not found';
-        if (caller.role !== role_1.Role.Admin && caller.id !== a.id)
-            throw 'Unauthorized';
-        if (data.email !== undefined && data.email) {
-            const e = data.email.toLowerCase();
-            if (e !== a.email) {
-                if (await db_1.Account.findOne({ where: { email: e } }))
-                    throw `Email ${e} is already in use`;
-                a.email = e;
-            }
-        }
-        if (data.title)
-            a.title = data.title;
-        if (data.firstName)
-            a.firstName = data.firstName;
-        if (data.lastName)
-            a.lastName = data.lastName;
-        if (data.password)
-            a.passwordHash = hashPassword(data.password);
-        if (data.role && canChangeRole)
-            a.role = data.role;
-        await a.save();
-        const u = (await db_1.Account.findByPk(id));
-        return basic(u);
-    },
-    async _delete(id) {
-        const a = await db_1.Account.findByPk(id);
-        if (!a)
-            throw 'Account not found';
-        await a.destroy();
-        return { message: 'Account deleted successfully' };
-    },
-    async refreshToken({ token, ipAddress }) {
-        const r = await db_1.RefreshToken.findOne({
-            where: { token, revoked: { [sequelize_1.Op.is]: null } },
-        });
-        if (!r || r.expires < new Date()) {
-            if (r && r.expires < new Date()) {
-                r.revoked = new Date();
-                r.revokedByIp = ipAddress;
-                r.reasonReplaced = 'expired on refresh';
-                await r.save();
-            }
-            throw 'Invalid or expired token';
-        }
-        const a = (await db_1.Account.findByPk(r.accountId));
-        if (!a)
-            throw 'Account not found';
-        const { token: newR, expires, account } = await buildRefresh(a, ipAddress);
-        r.revoked = new Date();
-        r.revokedByIp = ipAddress;
-        r.replacedByToken = newR;
-        r.reasonReplaced = 'Rotated on refresh';
-        await r.save();
-        const jwtT = generateJwt(account);
-        return { user: basic(account), token: jwtT, refreshToken: newR, refreshTokenExpires: expires.getTime() };
-    },
-    async revokeToken({ token, ipAddress, callerId, isAdmin, }) {
-        if (token == null || token === '') {
-            throw 'Refresh token required (body or cookie)';
-        }
-        const r = await db_1.RefreshToken.findOne({ where: { token, revoked: { [sequelize_1.Op.is]: null } } });
-        if (!r)
-            return { message: 'Token revoked' };
-        if (!isAdmin && r.accountId !== callerId)
-            throw 'Unauthorized to revoke this token';
-        r.revoked = new Date();
-        r.revokedByIp = ipAddress;
-        r.reasonReplaced = 'User revoked';
-        await r.save();
-        return { message: 'Token revoked' };
-    },
-};
+async function resetPassword({ token, password }) {
+    const account = await validateResetToken({ token });
+    account.passwordHash = await hash(password);
+    account.passwordReset = Date.now();
+    account.resetToken = null;
+    await account.save();
+}
+async function getAll() {
+    const accounts = await db_1.db.Account.findAll();
+    return accounts.map((x) => basicDetails(x));
+}
+async function getById(id) {
+    const account = await getAccount(id);
+    return basicDetails(account);
+}
+async function create(params) {
+    if (await db_1.db.Account.findOne({ where: { email: params.email } })) {
+        throw 'Email "' + params.email + '" is already registered';
+    }
+    const account = new db_1.db.Account(params);
+    account.verified = Date.now();
+    account.passwordHash = await hash(params.password);
+    await account.save();
+    return basicDetails(account);
+}
+async function update(id, params) {
+    const account = await getAccount(id);
+    if (params.email && account.email !== params.email && await db_1.db.Account.findOne({ where: { email: params.email } })) {
+        throw 'Email "' + params.email + '" is already taken';
+    }
+    if (params.password) {
+        params.passwordHash = await hash(params.password);
+    }
+    Object.assign(account, params);
+    account.updated = Date.now();
+    await account.save();
+    return basicDetails(account);
+}
+async function _delete(id) {
+    const account = await getAccount(id);
+    await account.destroy();
+}
+async function getAccount(id) {
+    const account = await db_1.db.Account.findByPk(id);
+    if (!account)
+        throw 'Account not found';
+    return account;
+}
+async function getRefreshToken(token) {
+    const refreshToken = await db_1.db.RefreshToken.findOne({ where: { token } });
+    if (!refreshToken || !refreshToken.isActive)
+        throw 'Invalid token';
+    return refreshToken;
+}
+async function hash(password) {
+    return await bcryptjs_1.default.hash(password, 10);
+}
+function generateJwtToken(account) {
+    const secret = process.env.JWT_SECRET ?? '';
+    return jsonwebtoken_1.default.sign({ sub: account.id, id: account.id }, secret, { expiresIn: '15m' });
+}
+function generateRefreshToken(account, ipAddress) {
+    return new db_1.db.RefreshToken({
+        accountId: account.id,
+        token: randomTokenString(),
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        createdByIp: ipAddress
+    });
+}
+function randomTokenString() {
+    return crypto_1.default.randomBytes(40).toString('hex');
+}
+function basicDetails(account) {
+    const { id, title, firstName, lastName, email, role, created, updated, isVerified } = account;
+    return { id, title, firstName, lastName, email, role, created, updated, isVerified };
+}
+async function sendVerificationEmail(account, origin) {
+    let message;
+    if (origin) {
+        const verifyUrl = `${origin}/account/verify-email?token=${account.verificationToken}`;
+        message = `<p>Please click the below link to verify your email address:</p>
+                   <p><a href="${verifyUrl}">${verifyUrl}</a></p>`;
+    }
+    else {
+        message = `<p>Please use the below token to verify your email address with the <code>/account/verify-email</code> api route:</p>
+                   <p><code>${account.verificationToken}</code></p>`;
+    }
+    await (0, send_email_1.default)({
+        to: account.email,
+        subject: 'Sign-up Verification API - Verify Email',
+        html: `<h4>Verify Email</h4>
+               <p>Thanks for registering!</p>
+               ${message}`
+    });
+}
+async function sendAlreadyRegisteredEmail(email, origin) {
+    let message;
+    if (origin) {
+        message = `<p>If you don't know your password please visit the <a href="${origin}/account/forgot-password">forgot password</a> page.</p>`;
+    }
+    else {
+        message = `<p>If you don't know your password you can reset it via the <code>/account/forgot-password</code> api route.</p>`;
+    }
+    await (0, send_email_1.default)({
+        to: email,
+        subject: 'Sign-up Verification API - Email Already Registered',
+        html: `<h4>Email Already Registered</h4>
+               <p>Your email <strong>${email}</strong> is already registered.</p>
+               ${message}`
+    });
+}
+async function sendPasswordResetEmail(account, origin) {
+    let message;
+    if (origin) {
+        const resetUrl = `${origin}/account/reset-password?token=${account.resetToken}`;
+        message = `<p>Please click the below link to reset your password, the link will be valid for 1 day:</p>
+                   <p><a href="${resetUrl}">${resetUrl}</a></p>`;
+    }
+    else {
+        message = `<p>Please use the below token to reset your password with the <code>/account/reset-password</code> api route:</p>
+                   <p><code>${account.resetToken}</code></p>`;
+    }
+    await (0, send_email_1.default)({
+        to: account.email,
+        subject: 'Sign-up Verification API - Reset Password',
+        html: `<h4>Reset Password Email</h4>
+               ${message}`
+    });
+}

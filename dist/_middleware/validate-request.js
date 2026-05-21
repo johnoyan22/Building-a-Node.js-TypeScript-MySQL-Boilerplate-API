@@ -2,12 +2,17 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateRequest = validateRequest;
 function validateRequest(req, next, schema) {
-    const { error, value } = schema.validate(req.body, { abortEarly: false, stripUnknown: true, convert: true });
+    const options = {
+        abortEarly: false,
+        allowUnknown: true,
+        stripUnknown: true
+    };
+    const { error, value } = schema.validate(req.body, options);
     if (error) {
-        const details = error.details.map((d) => d.message).join('; ');
-        next(`Validation: ${details}`);
-        return;
+        next(`Validation Error: ${error.details.map((d) => d.message).join(", ")}`);
     }
-    req.body = value;
-    next();
+    else {
+        req.body = value;
+        next();
+    }
 }

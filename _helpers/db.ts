@@ -1,14 +1,12 @@
 import { Sequelize } from 'sequelize';
 import { createConnection } from 'mysql2/promise';
 import { config } from './load-config';
-import { initAccountModel, Account } from '../accounts/account.model';
-import { initRefreshTokenModel, RefreshToken } from '../accounts/refresh-token.model';
+import accountModel from '../accounts/account.model';
+import refreshTokenModel from '../accounts/refresh-token.model';
 
 const { host, port, user, password, database } = config.database;
 
-let sequelize: Sequelize;
-
-export { Account, RefreshToken };
+export const db: any = {};
 
 export const initialize = async () => {
   const useSsl = process.env.DB_SSL === 'true';
@@ -23,7 +21,7 @@ export const initialize = async () => {
     console.warn(`Could not create database \`${database}\` (it may already exist or user has limited privileges):`, err);
   }
 
-  sequelize = new Sequelize(database, user, password, {
+  const sequelize = new Sequelize(database, user, password, {
     host,
     port,
     dialect: 'mysql',
@@ -31,16 +29,18 @@ export const initialize = async () => {
     dialectOptions: sslConfig ? { ssl: sslConfig } : undefined,
   });
 
-  initAccountModel(sequelize);
-  initRefreshTokenModel(sequelize);
+  db.Account = accountModel(sequelize);
+  db.RefreshToken = refreshTokenModel(sequelize);
 
-  Account.hasMany(RefreshToken, { foreignKey: 'accountId', onDelete: 'CASCADE' });
-  RefreshToken.belongsTo(Account, { foreignKey: 'accountId' });
+  db.Account.hasMany(db.RefreshToken, { foreignKey: 'accountId', onDelete: 'CASCADE' });
+  db.RefreshToken.belongsTo(db.Account, { foreignKey: 'accountId' });
+
+  db.sequelize = sequelize;
 
   await sequelize.sync();
 };
 
 export const getSequelize = () => {
-  if (!sequelize) throw new Error('Database not initialized. Call initialize() first.');
-  return sequelize;
+  if (!db.sequelize) throw new Error('Database not initialized. Call initialize() first.');
+  return db.sequelize;
 };
