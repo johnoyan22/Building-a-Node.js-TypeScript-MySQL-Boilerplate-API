@@ -15,7 +15,7 @@ export const initialize = async () => {
   const sslConfig = useSsl ? { minVersion: 'TLSv1.2', rejectUnauthorized: false } : undefined;
 
   try {
-    const conn = await createConnection({ host, port, user, password, ssl: sslConfig });
+    const conn = await createConnection({ host, port, user, password, database, ssl: sslConfig });
     await conn.query(`CREATE DATABASE IF NOT EXISTS \`${database}\``);
     await conn.end();
   } catch (err) {
