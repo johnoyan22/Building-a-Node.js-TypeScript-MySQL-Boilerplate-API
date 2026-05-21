@@ -39,7 +39,7 @@ const generateJwt = (a: { id: number; role: RoleType }) =>
   );
 
 async function sendVerification(a: AccModel, vToken: string) {
-  const link = `${config.apiUrl}/accounts/verify-email?token=${encodeURIComponent(vToken)}`;
+  const link = `${config.frontendUrl}/account/verify-email?token=${encodeURIComponent(vToken)}`;
   const html = `
     <h3>Verify Email</h3>
     <p>Thanks for registering!</p>
@@ -53,7 +53,7 @@ async function sendVerification(a: AccModel, vToken: string) {
 
 async function sendPasswordReset(a: AccModel) {
   const t = a.resetToken as string;
-  const link = `${config.apiUrl}/accounts/validate-reset-token?token=${encodeURIComponent(t)}`;
+  const link = `${config.frontendUrl}/account/reset-password?token=${encodeURIComponent(t)}`;
   const html = `
     <h3>Reset Password</h3>
     <p>Hi ${accLabel(a)}</p>

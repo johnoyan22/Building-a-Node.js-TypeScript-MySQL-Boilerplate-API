@@ -17,4 +17,5 @@ export const config: AppConfig = {
   emailTo: process.env.EMAIL_TO || '',
   resendApiKey: process.env.RESEND_API_KEY || process.env.SMTP_PASS || '',
   apiUrl: process.env.API_URL || 'http://localhost:4000',
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:4200',
 };
